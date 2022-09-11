@@ -9,7 +9,6 @@ except ImportError:
     from yaml import Loader, Dumper
 
 # TODO: TO IMPLEMENT
-# TODO: - Have a fixed system to choose the cleaning shifts
 # TODO: - Allow users to message back to the bot to notify a completed cleaning task
 # TODO: - Make a conda environment for this
 # TODO: - Add proper error handling
@@ -55,22 +54,32 @@ def send_message(user, text):
     return res.status_code
 
 
+def get_week_number():
+    # Compute the weeknumber from today (the -1 is so that a week starts from monday and not sunday)
+    return (datetime.date.today().toordinal() - 1) // 7
+
+
 class CleaningSchedules:
     def __init__(self, config_file_path):
         configs = read_yaml_file_and_check_for_items(config_file_path, ["users", "tasks"])
         self.job_list = configs["tasks"]
         self.users_list = configs["users"]
-        self.assigned_job = dict((user, task) for task, user in enumerate(self.users_list))
 
     def build_jobs_msg(self):
+        assigned_task = self._assign_tasks()
         msg = "Cleaning Tasks for this weekend:\n"
-        for p, j in self.assigned_job.items():
+        for p, j in assigned_task.items():
             msg += f"- {p}: {self.job_list[j]}\n"
         return msg
 
-    def update_jobs(self):
-        for p in self.assigned_job.keys():
-            self.assigned_job[p] = (self.assigned_job[p] + 1) % 4
+    def _assign_tasks(self):
+        week_number = get_week_number()
+        task = week_number % len(self.users_list)
+        assigned_task = {}
+        for p in self.users_list:
+            assigned_task[p] = task
+            task = (task + 1) % len(self.users_list)
+        return assigned_task
 
 
 def get_wakeup_datetime():
@@ -80,24 +89,20 @@ def get_wakeup_datetime():
 
 
 if __name__ == '__main__':
-    last_update_day = None
     cleaning_schedules = CleaningSchedules("configs.yaml")
-    text = f"I'm alive bitches. Have a preview of this weekend!\n{cleaning_schedules.build_jobs_msg()}"
+    text = f"I'm alive bitches. This bot is set up for users {cleaning_schedules.users_list} with tasks {cleaning_schedules.job_list}"
     send_message(GROUP_ID, text)
     while True:
         # Handle cleaning schedules
         today = datetime.date.today().isoweekday()
-        if today != last_update_day:
-            last_update_day = today
-            print(f"Processing day {today}!")
-            if today == 6:
-                # SATURDAY
-                send_message(GROUP_ID, cleaning_schedules.build_jobs_msg())
-            elif today == 7:
-                # SUNDAY
-                text = f"REMINDER!\n{cleaning_schedules.build_jobs_msg()}"
-                send_message(GROUP_ID, text)
-                cleaning_schedules.update_jobs()
+        print(f"Processing day {today}!")
+        if today == 6:
+            # SATURDAY
+            send_message(GROUP_ID, cleaning_schedules.build_jobs_msg())
+        elif today == 7:
+            # SUNDAY
+            text = f"REMINDER!\n{cleaning_schedules.build_jobs_msg()}"
+            send_message(GROUP_ID, text)
 
         wakeup_datetime = get_wakeup_datetime()
         time.sleep((wakeup_datetime - datetime.datetime.now()).total_seconds())
