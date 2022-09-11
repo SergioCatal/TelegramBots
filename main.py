@@ -9,29 +9,33 @@ except ImportError:
     from yaml import Loader, Dumper
 
 # TODO: TO IMPLEMENT
-# TODO: - Load api token from file
-# TODO: - Load settings from file
 # TODO: - Have a fixed system to choose the cleaning shifts
 # TODO: - Allow users to message back to the bot to notify a completed cleaning task
 # TODO: - Make a conda environment for this
 # TODO: - Add proper error handling
 
 
-def get_telegram_configs():
+def read_yaml_file_and_check_for_items(file_path, required_items):
     try:
-        with open("secrets.yaml", "r") as f:
-            secrets = load(f, Loader)
-            if "token" not in secrets.keys() or "group_id" not in secrets.keys():
-                print("ERROR: Token or GroupId not in yaml configuration file!")
-                exit(1)
-
-            return secrets["token"], secrets["group_id"]
+        with open(file_path, "r") as f:
+            yaml_contents = load(f, Loader)
+            yaml_keys = yaml_contents.keys()
+            for req_item in required_items:
+                if req_item not in yaml_keys:
+                    print(f"ERROR: Yaml file {file_path} does not contain item {req_item}")
+                    exit(1)
+            return yaml_contents
     except OSError as e:
         print(f"ERROR: Unable to open yaml configuration file!\n{e}")
         exit(1)
     except YAMLError as e:
         print(f"ERROR: Unable to parse yaml configuration file!\n{e}")
         exit(1)
+
+
+def get_telegram_configs():
+    configs = read_yaml_file_and_check_for_items("secrets.yaml", ["token", "group_id"])
+    return configs["token"], configs["group_id"]
 
 
 # Telegram stuff
@@ -52,9 +56,11 @@ def send_message(user, text):
 
 
 class CleaningSchedules:
-    def __init__(self):
-        self.job_list = ["BathroomBig", "BathroomSmall", "Kitchen", "LivingRoom"]
-        self.assigned_job = {"Gabor": 1, "Luca": 3, "Rob": 2, "Sergio": 0}
+    def __init__(self, config_file_path):
+        configs = read_yaml_file_and_check_for_items(config_file_path, ["users", "tasks"])
+        self.job_list = configs["tasks"]
+        self.users_list = configs["users"]
+        self.assigned_job = dict((user, task) for task, user in enumerate(self.users_list))
 
     def build_jobs_msg(self):
         msg = "Cleaning Tasks for this weekend:\n"
@@ -75,7 +81,7 @@ def get_wakeup_datetime():
 
 if __name__ == '__main__':
     last_update_day = None
-    cleaning_schedules = CleaningSchedules()
+    cleaning_schedules = CleaningSchedules("configs.yaml")
     text = f"I'm alive bitches. Have a preview of this weekend!\n{cleaning_schedules.build_jobs_msg()}"
     send_message(GROUP_ID, text)
     while True:
