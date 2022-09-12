@@ -2,6 +2,7 @@ import time
 import requests
 import pprint
 import datetime
+import json
 from yaml import load, dump, YAMLError
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
@@ -42,11 +43,16 @@ API_TOKEN, GROUP_ID = get_telegram_configs()
 BASE_URL = f"https://api.telegram.org/bot{API_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_URL}/sendMessage"
 GET_UPDATES_URL = f"{BASE_URL}/getUpdates"
+SET_COMMANDS_URL = f"{BASE_URL}/setMyCommands"
 
 
-def get_updates():
-    res = requests.get(f"{GET_UPDATES_URL}")
-    pprint.pprint(res.json())
+def get_updates(offset=None):
+    if offset is None:
+        res = requests.get(f"{GET_UPDATES_URL}")
+    else:
+        res = requests.get(f"{GET_UPDATES_URL}?offset={offset+1}")
+    updates = res.json()
+    return updates
 
 
 def send_message(user, text):
@@ -88,21 +94,58 @@ def get_wakeup_datetime():
     return datetime.datetime.fromordinal(wake_up_day) + wake_up_time
 
 
+def process_message(msg, schedules):
+    if msg["text"] == "/get_tasks":
+        pprint.pprint(msg)
+        chat_id = msg["chat"]["id"]
+        send_message(chat_id, schedules.build_jobs_msg())
+
+
+def process_updates(updates, schedules):
+    last_id = None
+    for update in updates:
+        if "message" in update:
+            process_message(update["message"], schedules)
+        last_id = update["update_id"]
+    return last_id
+
+
+def set_commands():
+    commands = [{"command": "get_tasks", "description": "Show assigned tasks"}]
+    res = requests.get(f"{SET_COMMANDS_URL}?commands={json.dumps(commands)}")
+    if res.status_code != 200:
+        print(f"ERROR: Unable to set bot commands!\n{res.text}")
+        exit(1)
+
+
 if __name__ == '__main__':
     cleaning_schedules = CleaningSchedules("configs.yaml")
     text = f"I'm alive bitches. This bot is set up for users {cleaning_schedules.users_list} with tasks {cleaning_schedules.job_list}"
+    set_commands()
     send_message(GROUP_ID, text)
+    wakeup_datetime = datetime.datetime.fromordinal(1)
+    last_update_id = None
     while True:
-        # Handle cleaning schedules
-        today = datetime.date.today().isoweekday()
-        print(f"Processing day {today}!")
-        if today == 6:
-            # SATURDAY
-            send_message(GROUP_ID, cleaning_schedules.build_jobs_msg())
-        elif today == 7:
-            # SUNDAY
-            text = f"REMINDER!\n{cleaning_schedules.build_jobs_msg()}"
-            send_message(GROUP_ID, text)
+        if datetime.datetime.now() > wakeup_datetime:
+            # Handle cleaning schedules
+            today = datetime.date.today().isoweekday()
+            print(f"Processing day {today}!")
+            if today == 6:
+                # SATURDAY
+                send_message(GROUP_ID, cleaning_schedules.build_jobs_msg())
+            elif today == 7:
+                # SUNDAY
+                text = f"REMINDER!\n{cleaning_schedules.build_jobs_msg()}"
+                send_message(GROUP_ID, text)
 
-        wakeup_datetime = get_wakeup_datetime()
-        time.sleep((wakeup_datetime - datetime.datetime.now()).total_seconds())
+            wakeup_datetime = get_wakeup_datetime()
+
+        updates = get_updates(last_update_id)
+        if updates["ok"]:
+            id = process_updates(updates["result"], cleaning_schedules)
+            if id is not None:
+                last_update_id = id
+        else:
+            print(f"ERROR: Failed to get updates from telegram!\n{updates}")
+            exit(1)
+        time.sleep(5)
