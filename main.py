@@ -38,7 +38,7 @@ def get_telegram_configs():
     return configs["token"], configs["group_id"]
 
 
-# Telegram stuff
+# Telegram stuffö
 API_TOKEN, GROUP_ID = get_telegram_configs()
 BASE_URL = f"https://api.telegram.org/bot{API_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_URL}/sendMessage"
@@ -46,18 +46,33 @@ GET_UPDATES_URL = f"{BASE_URL}/getUpdates"
 SET_COMMANDS_URL = f"{BASE_URL}/setMyCommands"
 
 
+def non_blocking(handler):
+    def wrapper(*args, **kwargs):
+        try:
+            return handler(*args, **kwargs)
+        except Exception:
+            return None
+    return wrapper
+
+
+@non_blocking
+def req_get(*args, **kwargs):
+    return requests.get(*args, **kwargs)
+
+
 def get_updates(offset=None):
     if offset is None:
-        res = requests.get(f"{GET_UPDATES_URL}")
+        res = req_get(f"{GET_UPDATES_URL}")
     else:
-        res = requests.get(f"{GET_UPDATES_URL}?offset={offset+1}")
-    updates = res.json()
+        res = req_get(f"{GET_UPDATES_URL}?offset={offset+1}")
+
+    updates = res.json() if res else None
     return updates
 
 
 def send_message(user, text):
-    res = requests.get(f"{SEND_MESSAGE_URL}?chat_id={user}&text={text}")
-    return res.status_code
+    res = req_get(f"{SEND_MESSAGE_URL}?chat_id={user}&text={text}")
+    return res.status_code if res else None
 
 
 def get_week_number():
@@ -112,10 +127,9 @@ def process_updates(updates, schedules):
 
 def set_commands():
     commands = [{"command": "get_tasks", "description": "Show assigned tasks"}]
-    res = requests.get(f"{SET_COMMANDS_URL}?commands={json.dumps(commands)}")
-    if res.status_code != 200:
+    res = req_get(f"{SET_COMMANDS_URL}?commands={json.dumps(commands)}")
+    if not res or res.status_code != 200:
         print(f"ERROR: Unable to set bot commands!\n{res.text}")
-        exit(1)
 
 
 if __name__ == '__main__':
@@ -141,11 +155,10 @@ if __name__ == '__main__':
             wakeup_datetime = get_wakeup_datetime()
 
         updates = get_updates(last_update_id)
-        if updates["ok"]:
+        if updates and updates["ok"]:
             id = process_updates(updates["result"], cleaning_schedules)
             if id is not None:
                 last_update_id = id
         else:
             print(f"ERROR: Failed to get updates from telegram!\n{updates}")
-            exit(1)
         time.sleep(5)
